@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111318">
+<title>FNA VOICE CHANNEL</title>
+<style>
+:root{--bg:#111318;--card:#1b1e26;--fg:#f1f2f5;--mut:#98a0b0;--acc:#5b8cff;--bad:#e5484d;--ok:#30a46c;--line:rgba(255,255,255,.08)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg)}
+body{color:var(--fg);font:16px/1.5 -apple-system,"Segoe UI",Roboto,sans-serif;max-width:480px;margin:0 auto;
+padding:max(20px,env(safe-area-inset-top)) 16px max(24px,env(safe-area-inset-bottom))}
+h1{font-size:22px;letter-spacing:.5px;margin:6px 0 2px;text-align:center}
+.sub{color:var(--mut);font-size:14px;text-align:center;margin:0 0 20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:14px}
+button{width:100%;padding:15px;border:0;border-radius:12px;background:var(--acc);color:#fff;font-size:17px;font-weight:700;margin-top:10px}
+button:active{transform:scale(.98)}
+button:disabled{opacity:.5}
+button.room{display:flex;justify-content:space-between;align-items:center;padding:20px 18px;font-size:20px}
+button.room small{font-weight:500;font-size:13px;opacity:.85}
+button.gray{background:#3a3f4b}
+button.red{background:var(--bad)}
+label{display:flex;gap:12px;align-items:flex-start;font-size:15px;cursor:pointer}
+label input{width:22px;height:22px;margin-top:2px;flex:none}
+label small{display:block;color:var(--mut);font-size:13px;margin-top:2px}
+.row{display:flex;justify-content:space-between;align-items:center;padding:11px 0;border-bottom:1px solid var(--line)}
+.row:last-child{border:0}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--ok);margin-right:8px}
+.me .dot{background:var(--acc)}
+#status{min-height:20px;font-size:14px;color:var(--mut);text-align:center;margin:8px 0}
+#status.err{color:#ff8a8d}
+.title{font-weight:700;margin-bottom:4px}
+</style>
+</head>
+<body>
+<h1>🎧 FNA VOICE CHANNEL</h1>
+<p class="sub">রুম বেছে নিন, মাইকের অনুমতি দিন, কথা বলুন</p>
+
+<div class="card">
+  <label><input type="checkbox" id="game" checked>
+  <span>🎮 গেম সাউন্ড মোড<small>অন থাকলে ইকো ও নয়েজ ফিল্টার বন্ধ থাকে, তাই গেমের সাউন্ড চাপা পড়ে কম। ইয়ারফোন ব্যবহার করুন।</small></span></label>
+</div>
+
+<div id="pick">
+  <button class="room" id="r1" data-room="fna1"><span>🔊 FNA1</span><small>ঢুকুন →</small></button>
+  <button class="room" id="r2" data-room="fna2"><span>🔊 FNA2</span><small>ঢুকুন →</small></button>
+</div>
+
+<div id="status"></div>
+
+<div id="live" hidden>
+  <div class="card">
+    <div class="title" id="rname"></div>
+    <div class="row me"><span><i class="dot"></i>আপনি</span><span id="mestate">🎤 চালু</span></div>
+    <div id="list"></div>
+  </div>
+  <button class="gray" id="mute">🎤 মাইক বন্ধ করুন</button>
+  <button id="unlock" hidden>🔊 শব্দ চালু করতে চাপুন</button>
+  <button class="red" id="leave">বের হোন</button>
+</div>
+<div id="audios"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+(function(){
+"use strict";
+var $=function(i){return document.getElementById(i)};
+var MAX=8;
+var peer=null,stream=null,calls={},pending={},myN=0,room="",muted=false,busy=false,scan=null,wake=null;
+
+function status(t,err){var s=$("status");s.textContent=t||"";s.className=err?"err":""}
+function num(id){return parseInt(String(id).split("-").pop(),10)}
+function wait(ms){return new Promise(function(r){setTimeout(r,ms)})}
+
+function render(){
+  var h="",ids=Object.keys(calls).sort(function(a,b){return num(a)-num(b)});
+  ids.forEach(function(id){h+='<div class="row"><span><i class="dot"></i>সদস্য '+num(id)+'</span><span>🎧 যুক্ত</span></div>'});
+  $("list").innerHTML=h||'<div class="row"><span style="color:var(--mut)">অন্য কেউ এখনো ঢোকেনি…</span></div>';
+}
+
+function attach(call,out){
+  call._out=out;
+  call.on("stream",function(s){
+    var id=call.peer,old=calls[id];
+    if(old&&old!==call){
+      var nNew=out?myN:num(id),nOld=old._out?myN:num(id);
+      if(nNew>=nOld){try{call.close()}catch(e){}return}
+      try{old.close()}catch(e){}
+    }
+    calls[id]=call;delete pending[id];
+    var prev=$("a-"+id);if(prev)prev.remove();
+    var a=document.createElement("audio");
+    a.id="a-"+id;a.autoplay=true;a.setAttribute("playsinline","");a.srcObject=s;
+    $("audios").appendChild(a);
+    var pr=a.play();
+    if(pr&&pr.catch)pr.catch(function(){$("unlock").hidden=false});
+    render();
+  });
+  function gone(){
+    var id=call.peer;
+    if(calls[id]===call){delete calls[id];var a=$("a-"+id);if(a)a.remove()}
+    delete pending[id];render();
+  }
+  call.on("close",gone);call.on("error",gone);
+}
+
+function dial(){
+  if(!peer||peer.destroyed||!stream)return;
+  for(var i=1;i<=MAX;i++){
+    if(i===myN)continue;
+    var id="fnavc-"+room+"-"+i;
+    if(calls[id]||pending[id])continue;
+    pending[id]=true;
+    try{
+      var c=peer.call(id,stream);
+      if(!c){delete pending[id];continue}
+      attach(c,true);
+      (function(c,id){setTimeout(function(){
+        if(!c.open){try{c.close()}catch(e){}}
+        if(pending[id])delete pending[id];
+      },9000)})(c,id);
+    }catch(e){delete pending[id]}
+  }
+}
+
+function openPeer(id){
+  return new Promise(function(res,rej){
+    var p=new Peer(id),ok=false;
+    var t=setTimeout(function(){if(ok)return;try{p.destroy()}catch(e){}rej({type:"timeout"})},12000);
+    p.on("open",function(){ok=true;clearTimeout(t);res(p)});
+    p.on("error",function(e){if(ok)return;clearTimeout(t);try{p.destroy()}catch(x){}rej(e||{})});
+  });
+}
+
+async function claim(){
+  var fails=0,n=1;
+  while(n<=MAX){
+    try{return {p:await openPeer("fnavc-"+room+"-"+n),n:n}}
+    catch(e){
+      if(e&&e.type==="unavailable-id"){n++;continue}
+      if(++fails>=3)throw new Error("সার্ভারে সংযোগ হয়নি। ইন্টারনেট দেখে আবার চেষ্টা করুন।");
+      await wait(1000);
+    }
+  }
+  throw new Error("রুম ভর্তি (সর্বোচ্চ "+MAX+" জন)।");
+}
+
+async function lockScreen(){
+  try{if(navigator.wakeLock&&document.visibilityState==="visible")wake=await navigator.wakeLock.request("screen")}catch(e){}
+}
+
+function cleanup(){
+  if(scan){clearInterval(scan);scan=null}
+  Object.keys(calls).forEach(function(id){try{calls[id].close()}catch(e){}});
+  calls={};pending={};
+  if(peer){try{peer.destroy()}catch(e){}peer=null}
+  if(stream){stream.getTracks().forEach(function(t){t.stop()});stream=null}
+  if(wake){try{wake.release()}catch(e){}wake=null}
+  $("audios").innerHTML="";
+  muted=false;myN=0;
+  $("mute").textContent="🎤 মাইক বন্ধ করুন";$("mestate").textContent="🎤 চালু";
+  $("unlock").hidden=true;
+}
+
+function errText(e){
+  var n=e&&e.name;
+  if(n==="NotAllowedError"||n==="SecurityError")return "মাইকের অনুমতি দেওয়া হয়নি। ব্রাউজার বা ফোনের সেটিংসে এই সাইটের জন্য মাইক Allow করুন, তারপর আবার ঢুকুন।";
+  if(n==="NotFoundError")return "কোনো মাইক পাওয়া যায়নি।";
+  if(n==="NotReadableError")return "মাইকটা অন্য অ্যাপ ব্যবহার করছে। সেটা বন্ধ করে আবার চেষ্টা করুন।";
+  return (e&&e.message)||"কিছু একটা সমস্যা হয়েছে, আবার চেষ্টা করুন।";
+}
+
+async function join(r){
+  if(busy)return;
+  if(typeof Peer==="undefined"){status("পেজ পুরোপুরি লোড হয়নি। ইন্টারনেট চেক করে রিফ্রেশ দিন।",true);return}
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){status("এই ব্রাউজারে মাইক চলে না। Safari বা Chrome ব্যবহার করুন।",true);return}
+  busy=true;room=r;
+  $("r1").disabled=$("r2").disabled=true;
+  try{
+    status("মাইকের অনুমতি দিন…");
+    var g=$("game").checked;
+    stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:!g,noiseSuppression:!g,autoGainControl:false}});
+    status("রুমে ঢোকা হচ্ছে…");
+    var res=await claim();
+    peer=res.p;myN=res.n;
+    peer.on("call",function(c){if(!stream){return}c.answer(stream);attach(c,false)});
+    peer.on("disconnected",function(){if(peer&&!peer.destroyed){try{peer.reconnect()}catch(e){}}});
+    peer.on("error",function(){});
+    $("rname").textContent="🔊 "+room.toUpperCase();
+    $("pick").hidden=true;$("live").hidden=false;status("");
+    render();dial();
+    scan=setInterval(dial,5000);
+    lockScreen();
+  }catch(e){
+    cleanup();status(errText(e),true);
+  }
+  busy=false;
+  $("r1").disabled=$("r2").disabled=false;
+}
+
+$("r1").onclick=function(){join("fna1")};
+$("r2").onclick=function(){join("fna2")};
+
+$("mute").onclick=function(){
+  muted=!muted;
+  if(stream)stream.getAudioTracks().forEach(function(t){t.enabled=!muted});
+  $("mute").textContent=muted?"🎤 মাইক চালু করুন":"🎤 মাইক বন্ধ করুন";
+  $("mestate").textContent=muted?"🔇 বন্ধ":"🎤 চালু";
+};
+
+$("game").onchange=async function(){
+  if(!stream)return;
+  var g=$("game").checked;
+  try{
+    await stream.getAudioTracks()[0].applyConstraints({echoCancellation:!g,noiseSuppression:!g,autoGainControl:false});
+    status(g?"গেম সাউন্ড মোড অন":"গেম সাউন্ড মোড অফ");
+  }catch(e){status("এখনই বদলানো গেল না। বের হয়ে আবার ঢুকলে কাজ করবে।",true)}
+};
+
+$("unlock").onclick=function(){
+  document.querySelectorAll("#audios audio").forEach(function(a){a.play().catch(function(){})});
+  $("unlock").hidden=true;
+};
+
+$("leave").onclick=function(){
+  cleanup();
+  $("live").hidden=true;$("pick").hidden=false;status("");
+};
+
+document.addEventListener("visibilitychange",function(){
+  if(document.visibilityState==="visible"&&stream){
+    lockScreen();
+    document.querySelectorAll("#audios audio").forEach(function(a){a.play().catch(function(){})});
+  }
+});
+window.addEventListener("pagehide",cleanup);
+})();
+</script>
+</body>
+</html>
